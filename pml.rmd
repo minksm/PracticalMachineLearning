@@ -1,0 +1,134 @@
+---
+title: 'Practical Machine Learning: Prediction Assignment'
+author: "Karen Mah"
+date: "Thursday, 17 August 2015"
+output: html_document
+---
+
+## Introduction  
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.  
+
+In this project, we will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they did the exercise.  
+
+## Load the libraries
+
+```{r, cache = T}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(corrplot)
+```
+
+## Download the Data
+
+```{r, cache = T}
+trainUrl <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+trainFile <- "./data/pml-training.csv"
+testFile  <- "./data/pml-testing.csv"
+if (!file.exists("./data")) {
+  dir.create("./data")
+}
+if (!file.exists(trainFile)) {
+  download.file(trainUrl, destfile=trainFile)
+}
+if (!file.exists(testFile)) {
+  download.file(testUrl, destfile=testFile)
+}
+
+```
+### Read and Clean the data
+```{r, cache = T}
+trainData <- read.csv("./data/pml-training.csv", na.strings=c("", "NA", "NULL"))
+testData <- read.csv("./data/pml-testing.csv", na.strings=c("", "NA", "NULL"))
+```
+### Clean the data by removing columns with NA
+```{r, cache = T}
+trainData <- trainData[, colSums(is.na(trainData)) == 0] 
+testData <- testData[, colSums(is.na(testData)) == 0] 
+dim(trainData)
+dim(testData)
+```
+The training data set contains 19622 observations and 60 variables, ad the testing data set contains 20 observations and 60 variables
+
+The predictor variables will be belt, arm, dumbbell, and forearm variables since they do not have missing values.
+
+We will now remove the variables that do not contribute to accelerometer measurements.
+
+```{r, cache = T}
+classe <- trainData$classe
+trainRemove <- grepl("^X|timestamp|window", names(trainData))
+trainData <- trainData[, !trainRemove]
+trainClean <- trainData[, sapply(trainData, is.numeric)]
+trainClean$classe <- classe
+
+testRemove <- grepl("^X|timestamp|window", names(testData))
+testData <- testData[, !testRemove]
+testClean <- testData[, sapply(testData, is.numeric)]
+
+dim(trainClean)
+dim(testClean)
+```
+Now, the cleaned training data set contains 19622 observations and 53 variables, while the testing data set contains 20 observations and 53 variables. The "classe" variable is still in the cleaned training set.
+
+## Split data to training and testing for cross validation.
+
+We will split the cleaned training set into a pure training data set (70%) and a testing(validation) data set (30%). 
+
+```{r, cache = T}
+set.seed(22519) # For reproducibile purpose
+inTrain <- createDataPartition(trainClean$classe, p=0.70, list=F)
+trainvData <- trainClean[inTrain, ]
+testvData <- trainClean[-inTrain, ]
+dim(trainvData)
+dim(testvData)
+```
+We have 13737 samples and 53 variables for training, and 5885 samples and 53 variables for testing.
+
+## Data Modeling
+
+We fit a predictive model for activity recognition using Random Forest algorithm as it automatically selects important variables and is robust to correlate covariates & outliers.s It is one of the best among classification algorithms as it is able to classify large amounts of data with accuracy. We will use 5-fold cross validation when applying the algorithm.  
+
+```{r, cache = T}
+controlRf <- trainControl(method="cv", repeats = 5,allowParallel=TRUE)
+modelRf <- train(classe ~ ., data=trainvData, method="rf", trControl=controlRf, ntree=250)
+modelRf
+```
+
+Next, we will estimate the performance of the model on the testing (validation) data set.
+
+```{r, cache = T}
+predictions <- predict(modelRf, testvData)
+#predictions
+confusionMatrix(predictions,testvData$classe)
+oose <- 1 - as.numeric(confusionMatrix(testvData$classe, predictions)$overall[1])
+oose
+```
+We can tell from the above that the estimated accuracy of the model is 99.30% and the estimated out-of-sample error is 0.72%.
+
+## Predicting for Test Data Set
+
+Now, we apply the model to the original testing data set downloaded from the data source. We remove the `problem_id` column first.  
+
+```{r, cache = T}
+result <- predict(modelRf, testClean[, -length(names(testClean))])
+result
+```
+
+## Appendix: Figures
+
+1. Correlation Matrix Visualization  
+
+```{r, cache = T, fig.height=9, fig.width=9, fig.path='figure/'}
+corrPlot <- cor(trainvData[, -length(names(trainvData))])
+corrplot(corrPlot, method="color")
+```
+
+2. Decision Tree Visualization
+
+```{r, cache = T, fig.height=9, fig.width=9, fig.path='figure/'}
+treeModel <- rpart(classe ~ ., data=trainvData, method="class")
+prp(treeModel) # fast plot
+```
+
